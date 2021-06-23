@@ -1,0 +1,43 @@
+version: '3'
+services:
+  Nodo_1:
+    image: nodo
+    build:
+      context: ./Nodo
+      dockerfile: ./Dockerfile
+    ports:
+      - 1500:5000
+    networks:
+      - clus_net
+    volumes:
+      - /home/jmorin/Escritorio/A1_Bully/:/app/data/
+    command: python /app/nodo_1.py 1 1500 1501,1502 0
+  
+  Nodo_2:
+    image: nodo
+    build:
+      context: ./Nodo
+      dockerfile: ./Dockerfile
+    ports:
+      - 1501:5000
+    networks:
+      - clus_net
+    volumes:
+      - /home/jmorin/Escritorio/A1_Bully/:/app/data/
+    command: python /app/nodo_1.py 2 1501 1500,1502 0
+
+  Nodo_3:
+    image: nodo
+    build:
+      context: ./Nodo
+      dockerfile: ./Dockerfile
+    ports:
+      - 1502:5000
+    networks:
+      - clus_net
+    volumes:
+      - /home/jmorin/Escritorio/A1_Bully/:/app/data/
+    command: python /app/nodo_1.py 3 1502 1500,1501 1
+
+networks:
+  clus_net:
