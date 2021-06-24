@@ -23,13 +23,16 @@ import time
 # print(responde_json['id'])
 
 datas = {
-        'id':'3',
-        'puerto':'503'
+        'K':[3],
+        'data_balance':'D',
+        'type_balance':'RR',
+        'name':'DataPreproces',
+        'type_cluster':'Kmeans'
         }
-url = '192.168.0.4:503/PRUEBA'
+url = '192.168.0.4:1505/RECIBIR_BALAANCE'
+print(url)
 headers = {'PRIVATE-TOKEN': '<your_access_token>', 'Content-Type':'application/json'}
-req = requests.post('http://'+url, headers=headers)
-
+req = requests.post('http://'+url,data=json.dumps(datas), headers=headers)
 
 # def pruebaa(a,b):
 #     while True:

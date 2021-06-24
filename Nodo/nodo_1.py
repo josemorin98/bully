@@ -7,7 +7,9 @@ import requests
 import sys
 import queue
 import time
-
+# imports balance and clustering
+import utils_balance
+import pandas as pd
 
 app = Flask(__name__)
 app.debug = True
@@ -91,7 +93,7 @@ def fun_verificar():
                 req = requests.post('http://'+url, headers=headers)
                 # app.logger.error('------ SOY EL NODO No.'+str(id_nodo)+' - '+str(puerto_nodo)+'------')
                 pet += 1
-                app.logger.error('------('+str(pet)+') ACTIVO '+str(puerto_cor)+' ------')
+                # app.logger.error('------('+str(pet)+') ACTIVO '+str(puerto_cor)+' ------')
         except requests.exceptions.ConnectionError:
             # Proceso de election
             puertos_kill.append(puerto_cor)
@@ -139,12 +141,6 @@ def prueba():
     app.logger.error('------ Verificacion '+str(puerto_cor)+' ------')
     return jsonify({'response':'SI'})
        
-# Envio de daots por request
-def enviar_datos(url,datas,q):
-    headers = {'PRIVATE-TOKEN': '<your_access_token>', 'Content-Type':'application/json'}
-    req = requests.post('http://'+url, data=json.dumps(datas), headers=headers)
-    q.put(req.json())
-
 
 def init():
     global coordina
@@ -198,9 +194,8 @@ def init():
         # Notificar a todos
         id_cor = id_nodo
         puerto_cor = puerto_nodo
-        nada = 0
         for puerto in puertos:
-            if (puerto not in puertos_kill and nada==0):
+            if (puerto not in puertos_kill):
                 # requests
                 url = '192.168.0.4:'+puerto+'/COORDINATOR'
                 datas = {
@@ -212,11 +207,135 @@ def init():
                 # Recibir
                 responde_json = req.json()
                 app.logger.info('------ SE NOTIFICO AL NODO '+str(puerto) + ' - ' + responde_json['response']+' ------')
-        nada = 1
+
+# Load Balance
+def enviar_datos(url,datas):
+    headers = {'PRIVATE-TOKEN': '<your_access_token>', 'Content-Type':'application/json'}
+    requests.post(url, data=json.dumps(datas), headers=headers)
+    
+    
+@app.route('/RECIBIR_BALAANCE',methods = ['POST'])
+def k_dividir():
+    global id_nodo
+    message = request.get_json()
+
+    ip='192.168.0.4'
+    port = id_nodo
+    
+    # Rwcibe los datos    
+    k_ = message['K']
+    data_balance = message['data_balance']
+    type_balance = message['type_balance']
+    type_cluster = message['type_cluster']
+    app.logger.info('------ K='+str(k_)+' / Data_balance='+data_balance+' ------')
+    
+    # genera los balaneacdores vacios
+    # Generamos puertos online
+    puertos_online =[]
+    for puerto in puertos:
+        if (puerto not in puertos_kill):
+            puertos_online.append(puerto)
+    workers = len(puertos_online)
+    
+    
+    init_data = utils_balance.init_workres_array(workers)
+    data_clus = utils_balance.read_CSV(message['name'])
+    
+    # numero de anos
+    type_balance_str = utils_balance.type_blane_cond(data_balance)
+    list_balance = data_clus[type_balance_str].unique()
+    
+    app.logger.error('------ ' + str(workers) + ' ------')
+    # Balanceador Round Robin
+    if (type_balance=='RR'):
+        init_data = utils_balance.RaoundRobin(init_data,list_balance,workers)
+    elif (type_balance=='PS'):
+        init_data = utils_balance.PseudoRandom(init_data,list_balance,workers)
+    elif (type_balance=='TC'):
+        init_data = utils_balance.TwoChoices(init_data,list_balance,workers)
+    else:
+        init_data = utils_balance.RaoundRobin(init_data,list_balance,workers)
+    
+    # Calculo de las ip
+    peticiones = []
+    # app.logger.error(puertos_online)
+    peticiones = []
+    inicio=time.time()
+    for x in range(workers):
+        if (len(init_data[x])>0):
+            concac=[]
+            for val in init_data[x]:
+                concac.append(data_clus[data_clus[type_balance_str]==val])
+            data_fin = pd.concat(concac)
+            name = "ID_"+str(x)+"_Port_"+str(puertos_online[x])+"_LD="+type_balance+"_DLB="+data_balance
+            data_fin.to_csv("./data/"+name+".csv")
+            data = {"K": k_,
+                "name": name,
+                "type_cluster":type_cluster
+                }
+            
+            url = "http://"+ip+":"+str(puertos_online[x])+"/CLUSTERING"
+            # app.logger.error('------ '+url+' ------')
+            aux = threading.Thread(target=enviar_datos,args=(url,data))
+            peticiones.append(aux)
+    # Iniciamos
+    for pet in peticiones:
+        pet.start()
+    # Unimos
+    for pet in peticiones:
+        pet.join()
+    fin = time.time()
+    app.logger.error('------ TIEMPO DEL CLUSTERING = '+str(fin-inicio) +' ------')
+    return jsonify({'response':'SI'})
+
+
+# cLustering
+@app.route('/CLUSTERING',methods = ['POST'])
+def clustering():
+    
+    
+    message = request.get_json()
+    # recibir K
+    k_ = message['K']
+    name = message['name']
+    type_cluster = message['type_cluster']
+    # encabezado de la peticion
+    # headers = {'PRIVATE-TOKEN': '<your_access_token>', 'Content-Type':'application/json'}
+    # url = "http://"+ip+":"+str(port)+"/recibir"
+    
+    data_clima = utils_balance.read_CSV(name)
+    
+    for k in k_:
+        # KMEANS
+        if (type_cluster=="Kmeans"):
+            # llamado del clustering
+            inicio = time.time()
+            k_labels = utils_balance.K_means(k,data_clima)
+            cluster="Kmeans"
+            fin = time.time()
+            app.logger.error('------ '+str(cluster)+" = "+str(fin-inicio) + ' ------')
+        elif (type_cluster=="GM"):
+            inicio = time.time()
+            k_labels = utils_balance.MixtureModel(k,data_clima)
+            cluster="GaussianMixture"
+            fin = time.time()
+            app.logger.error('------ '+str(cluster)+" = "+str(fin-inicio) + ' ------')
+        else:
+            inicio = time.time()
+            k_labels = utils_balance.K_means(k,data_clima)
+            cluster="Kmeans"
+            fin = time.time()
+            app.logger.error('------ '+str(cluster)+" = "+str(fin-inicio) + ' ------')
+        # data send
+        
+        data_clima["clase"]=k_labels
+        data_clima.to_csv("./data/results/Clus_"+name+"_DataClust_K="+str(k)+"_"+str(cluster)+".csv")
+    return jsonify({'response':'CLUSTERING TERMINADO'})
+
+
 
 # Coordinador
-nada = 0
-if (coordina==True and nada==0):
+if (coordina==True):
     # Notifico que es el coordinador
     app.logger.info('------ SOY EL COORDINADOR - No.'+str(id_nodo) + ' ------')
     time.sleep(10)
@@ -234,9 +353,6 @@ if (coordina==True and nada==0):
             # Recibir
             responde_json = req.json()
             app.logger.info('------ SE NOTIFICO AL NODO '+str(puerto) + ' - ' + responde_json['response']+' ------')
-    nada=1
         
-    
-    
 if __name__ == '__main__':
     app.run(host= '0.0.0.0',debug=True)
